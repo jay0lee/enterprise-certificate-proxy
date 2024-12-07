@@ -89,4 +89,4 @@ jobs:
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.os_directory }}_${{ matrix.arch }}
-        path: ./build/bin/${os_directory}_${arch}/*
+        path: ./build/bin/${{ matrix.os_directory }}_${{ matrix.arch }}/*
