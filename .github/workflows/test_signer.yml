@@ -68,7 +68,7 @@ jobs:
       run: |
         if [[ "${RUNNER_OS}" == "Linux" ]]; then
             export testSlot=$(pkcs11-tool \
-                                --list-slots
+                                --list-slots \
                                 --module "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so" | \
                                 grep -Eo "0x[A-Fa-f0-9]+" | \
                                 head -n 1)
