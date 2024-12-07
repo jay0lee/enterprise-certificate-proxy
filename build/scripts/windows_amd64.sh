@@ -23,7 +23,7 @@ cd ../../../
 
 # Build the signer library
 # TODO: Add build version to shared DLL. https://github.com/googleapis/enterprise-certificate-proxy/issues/103
-go build -buildmode=c-shared -o build/bin/windows_amd64/libecp.dll /cshared/main.go
-go build -buildmode=c-archive -o build/bin/windows_amd64/libecp.lib ./cshared/main.go
+go build -buildmode=c-shared -o build/bin/windows_amd64/libecp.dll cshared/main.go
+go build -buildmode=c-archive -o build/bin/windows_amd64/libecp.lib cshared/main.go
 
-rm -vrf .\build\bin\windows_amd64\libecp.h
+rm -vrf build/bin/windows_amd64/libecp.h
