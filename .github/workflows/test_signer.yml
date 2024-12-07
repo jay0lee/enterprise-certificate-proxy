@@ -1,0 +1,89 @@
+name: Build and Test Signer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            os_directory: darwin
+          - os: macos-13
+            arch: x86_64
+            os_directory: darwin
+          - os: ubuntu-latest
+            arch: x86_64
+            os_directory: linux
+          - os: windows-latest
+            arch: x86_64
+            os_directory: windows
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Linux Bootstrap SoftHSM Credentials
+      if: runner.os == 'Linux'
+      run: ./scripts/softhsm_setup.sh
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+        check-latest: true
+
+    - name: Build
+      working-directory: ./internal/signer/${{ matrix.os_directory }}
+      run: go build -v ./...
+
+      # The binary must be built before creating credentials so it can be added
+      # as a trusted application to the keychain.
+    - name: Build Test Binary for Signer
+      if: runner.os == 'macOS'
+      working-directory: ./internal/signer/darwin/keychain
+      run: go test -c .
+
+    - name: MacOS Create keychain credentials
+      if: runner.os == 'macOS'
+      run: ./scripts/keychain_cred.sh
+
+    - name: MacOS Run Test Binary for Signer
+      if: runner.os == 'macOS'
+      working-directory: ./internal/signer/darwin/keychain
+      run: ./keychain.test
+
+    - name: Test
+      working-directory: ./internal/signer/${{ matrix.os_directory }}
+      run: |
+        if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            go test -v ./... -testSlot=$(pkcs11-tool --list-slots --module "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so" | grep -Eo "0x[A-Fa-f0-9]+" | head -n 1)
+        else
+            go test -v .
+        fi
+
+    - name: Lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+        working-directory: ./internal/signer/${{ matrix.os_directory }}
+        args: -E gofmt --max-same-issues 0
+
+    - name: Create Binaries
+      env:
+        arch: ${{ matrix.arch }}
+        os_directory: ${{ matrix.os_directory }}
+      run: |
+        "./build/scripts/${os_directory}_${arch}.sh"
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.os_directory }}_${{ matrix.arch }}
+        path: ./build/bin/${os_directory}_${arch}/*
