@@ -67,7 +67,13 @@ jobs:
       working-directory: ./internal/signer/${{ matrix.os_directory }}
       run: |
         if [[ "${RUNNER_OS}" == "Linux" ]]; then
-            go test -v ./... -testSlot=$(pkcs11-tool --list-slots --module "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so" | grep -Eo "0x[A-Fa-f0-9]+" | head -n 1)
+            export testSlot=$(pkcs11-tool \
+                                --list-slots
+                                --module "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so" | \
+                                grep -Eo "0x[A-Fa-f0-9]+" | \
+                                head -n 1)
+            echo "Using test slot ${testSlot}..."
+            go test -v ./... -testSlot="$testSlot"
         else
             go test -v .
         fi
