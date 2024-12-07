@@ -6,8 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
-jobs:
+defaults:
+  run:
+    shell: bash
 
+jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -18,13 +21,13 @@ jobs:
             arch: arm64
             os_directory: darwin
           - os: macos-13
-            arch: x86_64
+            arch: amd64
             os_directory: darwin
           - os: ubuntu-latest
-            arch: x86_64
+            arch: amd64
             os_directory: linux
           - os: windows-latest
-            arch: x86_64
+            arch: amd64
             os_directory: windows
 
     steps:
