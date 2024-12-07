@@ -49,7 +49,7 @@ jobs:
 
       # The binary must be built before creating credentials so it can be added
       # as a trusted application to the keychain.
-    - name: Build Test Binary for Signer
+    - name: MacOS Build Test Binary for Signer
       if: runner.os == 'macOS'
       working-directory: ./internal/signer/darwin/keychain
       run: go test -c .
@@ -73,10 +73,11 @@ jobs:
                                 grep -Eo "0x[A-Fa-f0-9]+" | \
                                 head -n 1)
             echo "Using test slot ${testSlot}..."
-            go test -v ./... -testSlot="$testSlot"
+            export test_args=( "-testSlot" "$testSlot" )
         else
-            go test -v .
+            export test_args=( )
         fi
+        go test -v ./... "${test_args[@]}"
 
     - name: Lint
       uses: golangci/golangci-lint-action@v3
