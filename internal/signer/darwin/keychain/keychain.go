@@ -32,7 +32,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"os"
@@ -316,8 +315,13 @@ func findMatchingIdentities(keychainType string, issuerCN string) ([]C.SecIdenti
 		return nil, nil, 0, fmt.Errorf("invalid keychain type: %s", keychainType)
 	}
 
-	// Restrict keychain search space
-	C.CFDictionaryAddValue(leafSearch, unsafe.Pointer(C.kSecMatchSearchList), unsafe.Pointer(keychainList))
+	// Restrict keychain search space — but only when filtering to
+	// a specific keychain type.  When keychainType is "all" or "",
+	// skip this to allow SecItemCopyMatching to search CryptoTokenKit
+	// tokens (where Secure Enclave keys live).
+	if keychainType == "login" || keychainType == "system" {
+		C.CFDictionaryAddValue(leafSearch, unsafe.Pointer(C.kSecMatchSearchList), unsafe.Pointer(keychainList))
+	}
 
 	var leafMatches C.CFTypeRef
 	if errno := C.SecItemCopyMatching(C.CFDictionaryRef(leafSearch), &leafMatches); errno != C.errSecSuccess {
@@ -328,11 +332,20 @@ func findMatchingIdentities(keychainType string, issuerCN string) ([]C.SecIdenti
 	var leafIdents []C.SecIdentityRef
 	var leafs []*x509.Certificate
 
+	if os.Getenv("ENABLE_ENTERPRISE_CERTIFICATE_LOGS") != "" {
+		fmt.Fprintf(os.Stderr, "ECP: findMatchingIdentities: %d identities found, looking for issuer=%q\n", int(C.CFArrayGetCount(signingIdents)), issuerCN)
+	}
 	for i := 0; i < int(C.CFArrayGetCount(signingIdents)); i++ {
 		identDict := C.CFArrayGetValueAtIndex(signingIdents, C.CFIndex(i))
 		xc, err := identityToX509(C.SecIdentityRef(identDict))
 		if err != nil {
+			if os.Getenv("ENABLE_ENTERPRISE_CERTIFICATE_LOGS") != "" {
+				fmt.Fprintf(os.Stderr, "ECP:   identity[%d]: error: %v\n", i, err)
+			}
 			continue // Skip this identity if there's an error
+		}
+		if os.Getenv("ENABLE_ENTERPRISE_CERTIFICATE_LOGS") != "" {
+			fmt.Fprintf(os.Stderr, "ECP:   identity[%d]: CN=%q, Issuer.CN=%q\n", i, xc.Subject.CommonName, xc.Issuer.CommonName)
 		}
 		if xc.Issuer.CommonName == issuerCN {
 			leafs = append(leafs, xc)
@@ -408,6 +421,9 @@ func Cred(issuerCN, keychainType string) (*Key, error) {
 		leaf = leafs[0]
 		leafIdent = leafIdents[0]
 	} else {
+		if os.Getenv("ENABLE_ENTERPRISE_CERTIFICATE_LOGS") != "" {
+			fmt.Fprintf(os.Stderr, "ECP: Cred(): no key found with issuer CN=%q\n", issuerCN)
+		}
 		return nil, fmt.Errorf("no key found with issuer common name %q", issuerCN)
 	}
 
@@ -486,31 +502,16 @@ func identityToX509(ident C.SecIdentityRef) (*x509.Certificate, error) {
 
 // certRefToX509 converts a single C.SecCertificateRef into an *x509.Certificate.
 func certRefToX509(certRef C.SecCertificateRef) (*x509.Certificate, error) {
-	// Export the PEM-encoded certificate to a CFDataRef.
-	var certPEMData C.CFDataRef
-	if errno := C.SecItemExport(C.CFTypeRef(certRef), C.kSecFormatUnknown, C.kSecItemPemArmour, nil, &certPEMData); errno != 0 {
-		return nil, keychainError(errno)
+	// Use SecCertificateCopyData instead of SecItemExport.
+	// SecItemExport fails silently for Secure Enclave / CryptoTokenKit
+	// identities, causing hardware-backed keys to be skipped.
+	certDERData := C.SecCertificateCopyData(certRef)
+	if certDERData == 0 {
+		return nil, fmt.Errorf("SecCertificateCopyData returned nil")
 	}
-	defer C.CFRelease(C.CFTypeRef(certPEMData))
-	certPEM := cfDataToBytes(certPEMData)
+	defer C.CFRelease(C.CFTypeRef(certDERData))
 
-	// This part based on crypto/tls.
-	var certDERBlock *pem.Block
-	for {
-		certDERBlock, certPEM = pem.Decode(certPEM)
-		if certDERBlock == nil {
-			return nil, fmt.Errorf("failed to parse certificate PEM data")
-		}
-		if certDERBlock.Type == "CERTIFICATE" {
-			// found it
-			break
-		}
-	}
-
-	// Check the certificate is OK by the x509 library, and obtain the
-	// public key algorithm (which I assume is the same as the private key
-	// algorithm). This also filters out certs missing critical extensions.
-	xc, err := x509.ParseCertificate(certDERBlock.Bytes)
+	xc, err := x509.ParseCertificate(cfDataToBytes(certDERData))
 	if err != nil {
 		return nil, err
 	}
