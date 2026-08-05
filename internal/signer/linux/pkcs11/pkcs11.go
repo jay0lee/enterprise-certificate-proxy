@@ -79,13 +79,20 @@ func Cred(pkcs11Module string, slotUint32Str string, label string, userPin strin
 	var kchain [][]byte
 	kchain = append(kchain, x509.Raw)
 
+	// Try label match first (backwards compatible with libtpm2_pkcs11,
+	// SoftHSM, and any module using matching labels across object types).
+	// Fall back to class-only match for modules like OpenSC that use
+	// different labels for cert vs key objects (e.g., YubiKey PIV).
 	pubKeys, err := kslot.Objects(pkcs11.Filter{Class: pkcs11.ClassPublicKey, Label: label})
+	if err == nil && len(pubKeys) < 1 {
+		pubKeys, err = kslot.Objects(pkcs11.Filter{Class: pkcs11.ClassPublicKey})
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	if len(pubKeys) < 1 {
-		return nil, fmt.Errorf("no public key object was found with label %s", label)
+		return nil, fmt.Errorf("no public key object was found in slot %s (label %q)", slotUint32Str, label)
 	}
 
 	pubKey, err := pubKeys[0].PublicKey()
@@ -94,12 +101,15 @@ func Cred(pkcs11Module string, slotUint32Str string, label string, userPin strin
 	}
 
 	privkeys, err := kslot.Objects(pkcs11.Filter{Class: pkcs11.ClassPrivateKey, Label: label})
+	if err == nil && len(privkeys) < 1 {
+		privkeys, err = kslot.Objects(pkcs11.Filter{Class: pkcs11.ClassPrivateKey})
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	if len(privkeys) < 1 {
-		return nil, fmt.Errorf("no private key object was found with label %s", label)
+		return nil, fmt.Errorf("no private key object was found in slot %s (label %q)", slotUint32Str, label)
 	}
 
 	privKey, err := privkeys[0].PrivateKey(pubKey)
